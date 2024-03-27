@@ -1,0 +1,185 @@
+---
+title: "PhD progress of Week13 2024"
+author: WANG Genmeng
+date: 29-03-2024
+format: html
+categories: [work]
+---
+
+# 29 03 2024
+- To review together
+    - LSTM of $\dot P$
+    - read the article of U. Fourssell, try to design a similar structur in PAM
+        - then compare the time and data needed between 'semi-physical' NN and FNN
+    - pre-treatement of PINN-$\dot P$ 
+
+## LSTM- $\dot P$
+At the first time, LSTM has been used for the prediction of $\dot P$. The main purpose to do experimentation with LSTM is because $\dot P$ is not time-independant, which means the evolution of $\dot P$ relies somehow the input of system and current state of PAM system.
+
+The data used for training are from Antoine LENOIR, with 6 different trajectories done by a plateform PAM, there are roughly 90 000 points collected with a time interval of 1e-3s. At each point, we have relative information of PAM as ${\cal{D}} =\lbrace\theta, \varepsilon, \dot \varepsilon, P, \dot P, u, q, F\rbrace$. In this dataset ${\cal{D}}$, data from real world which means data are measured but not calculated with a model are $\theta, P, u$. From these three variables, we will get an estimation of the rest variables $\varepsilon, \dot \varepsilon, \dot P, q, F$ in a certain accurancy level.
+
+
+### Train data visualization
+
+#### **3D**
+```{python}
+import scipy.io
+import matplotlib.pyplot as plt
+import matplotlib
+import numpy as np
+from matplotlib import cm
+from matplotlib.ticker import LinearLocator
+import plotly.express as px
+import plotly.graph_objects as go
+
+%matplotlib inline
+%matplotlib widget
+alpha = 2.347
+A = 330
+B1 = 0.69
+B2 = 0.05 
+theta_0 = 0.3979 #rads
+D0 = 0.01 #m
+L0 = 0.2 #m
+k=1.4
+r=263.8  #J/(kg*K)
+Temp = 293  #K
+epsilon_max = 0.2
+epsilon_min = -0.03
+
+epsilon_0 = 0
+
+N = 1000
+T = 10 #s
+
+def H (epsilon) :
+    return np.pi * D0**2 / 4 *(3*(1-epsilon)**alpha/np.tan(theta_0)**2 - 1/np.sin(theta_0)**2)
+
+def L(epsilon):
+    return A*epsilon*(epsilon - B1)/(epsilon + B2)
+
+def dVde(epsilon):
+    return np.pi * D0**2 * L0 / 4*(- 1/np.sin(theta_0)**2 + (alpha+1)*(1-epsilon)**(alpha)/np.tan(theta_0)**2)
+
+def V(epsilon):
+    return np.pi*D0**2*L0/4*(1/np.sin(theta_0)**2 -(1-epsilon)**(alpha)/np.tan(theta_0)**2)*(1-epsilon)
+
+def Phi(theta):
+    return theta - np.arcsin((epsilon_max+epsilon_min)/(epsilon_max - epsilon_min))
+    
+def Epsilon(phi):
+    return (epsilon_max - epsilon_min)/2 * np.sin(phi) + (epsilon_max+epsilon_min)/2
+
+def dotEpsilon(phi):
+    return (epsilon_max - epsilon_min) * np.cos(phi) * np.pi / T
+
+def Force(epsilon,P):
+    return H(epsilon) * P + L(epsilon)
+
+def dpdt(P,q,epsilon,dot_epsilon):
+    return k * r * Temp / V(epsilon)*(q - P/(r*Temp) * dVde(epsilon) * dot_epsilon)
+
+e = np.linspace(0,0.2,1000)
+Pg = np.linspace(0,600000,1000)
+e,Pg = np.meshgrid(e,Pg)
+H_e = H(e)
+L_e = L(e)
+
+F = H_e * Pg + L_e
+
+file_mapping = {
+    1:"A1F1.mat",
+    2:"A1F2.mat",
+    3:"A2F1.mat",
+    4:"A2F2.mat",
+    5:"A2_5F1.mat",
+    6:"A2_5F2.mat"
+}
+file_name = file_mapping.get(1)
+if file_name:
+    # load .mat file
+    data_visual = scipy.io.loadmat(rf'C:\Users\gwang\OneDrive - INSA Lyon\code Python\PAMs\DataAntoirL\Data_SuiviDeTrajectoire\{file_name}')
+else:
+    print("Invalid file number !")
+    
+# Raw data
+epsilon = data_visual['epsilon'][0]
+dot_epsilon = data_visual['d_epsilon'][0] # e_t+1 - e_t /dt = dot_e_t+1
+q = data_visual['qm'][0]
+P_capteur = data_visual['p_capteur'][0]
+
+epsilon = epsilon[:-1] # slice the last element in array
+dot_epsilon  = dot_epsilon[1:] #slice the first element in array
+dot_P = (P_capteur[1:] - P_capteur[:-1])*10**3#dt = 1e-3s #bar/s
+P_capteur = P_capteur[:-1] #bar
+q = q[:-1] # Nl/min
+F_model = Force(epsilon, P_capteur*10**5)
+dot_P_estim = dpdt(P=P_capteur*10**5, q=q*2.1542*10**-5, epsilon=epsilon,dot_epsilon=dot_epsilon )*10**-5
+
+# Filtering raw data
+kernel = np.ones(100) / 100
+filtered_dot_P = np.convolve(dot_P, kernel, mode='same')
+flitered_dot_P_estim = np.convolve(dot_P_estim, kernel, mode='same')
+filtered_dot_epsilon = np.convolve(dot_epsilon, kernel, mode='same')
+```
+
+```{python}
+
+traces = {}
+traces[1] = go.Scatter3d(x=epsilon[::10], y=P_capteur[::10], z=dot_P[::10], mode='markers',  marker=dict(
+        size=2,
+        color='blue',
+        opacity=0.8
+    ))
+
+traces[2] = go.Scatter3d(x=epsilon[::10], y=P_capteur[::10], z=dot_P_estim[::10], mode='markers',  marker=dict(
+        size=2,
+        color='orange',
+        opacity=0.8
+    ))
+
+traces[3] = go.Scatter3d(x=epsilon[::10], y=P_capteur[::10], z=(dot_P-dot_P_estim)[::10], mode='markers',  marker=dict(
+        size=2,
+        color='green',
+        opacity=0.8
+    ))
+fig1 = go.Figure()
+for trace_name, trace in traces.items():
+    fig1.add_trace(trace)
+
+fig1.show()
+
+```
+
+```{python}
+tracesT2 = {}
+tracesT2[1] = go.Scatter3d(x=epsilon[::10], y=P_capteur[::10], z=filtered_dot_P[::10], mode='markers',  marker=dict(
+        size=2,
+        color='blue',
+        opacity=0.8
+    ))
+
+tracesT2[2] = go.Scatter3d(x=epsilon[::10], y=P_capteur[::10], z=flitered_dot_P_estim[::10], mode='markers',  marker=dict(
+        size=2,
+        color='orange',
+        opacity=0.8
+    ))
+
+tracesT2[3] = go.Scatter3d(x=epsilon[::10], y=P_capteur[::10], z=(filtered_dot_P-flitered_dot_P_estim)[::10], mode='markers',  marker=dict(
+        size=2,
+        color='green',
+        opacity=0.8
+    ))
+fig2 = go.Figure()
+for trace_name, trace in tracesT2.items():
+    fig2.add_trace(trace)
+
+fig2.show()
+
+```
+
+#### **2D**
+
+### 
+
+## PINN-$\dot P$

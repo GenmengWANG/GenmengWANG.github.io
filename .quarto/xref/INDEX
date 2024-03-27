@@ -4,5 +4,14 @@
   },
   "index.qmd": {
     "index.html": "5c660000"
+  },
+  "posts/post-with-code/index.qmd": {
+    "index.html": "67d07a5d"
+  },
+  "posts/welcome/index.qmd": {
+    "index.html": "f87db7ba"
+  },
+  "posts/W13_PhD progress/index.qmd": {
+    "index.html": "6422b31e"
   }
 }
